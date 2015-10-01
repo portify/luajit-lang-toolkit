@@ -118,6 +118,10 @@ function expr_simple(ast, ls)
         ls:next()
         local args, body, proto = parse_body(ast, ls, ls.linenumber, false)
         return ast:expr_function(args, body, proto)
+    elseif tk == 'TK_lambda' then
+        ls:next()
+        local args, body, proto = parse_body(ast, ls, ls.linenumber, false, true)
+        return ast:expr_function(args, body, proto)
     else
         return expr_primary(ast, ls)
     end
@@ -373,7 +377,7 @@ local function parse_while(ast, ls, line)
     ls:next() -- Skip 'while'.
     local cond = expr(ast, ls)
     ast:fscope_begin()
-    lex_check(ls, 'TK_do')
+    -- lex_check(ls, 'TK_do')
     local body = parse_block(ast, ls)
     local lastline = ls.linenumber
     lex_match(ls, 'TK_end', 'TK_while', line)
@@ -384,7 +388,7 @@ end
 local function parse_then(ast, ls, tests, line)
     ls:next()
     tests[#tests+1] = expr(ast, ls)
-    lex_check(ls, 'TK_then')
+    -- lex_check(ls, 'TK_then')
     return parse_block(ast, ls, line)
 end
 
@@ -524,20 +528,31 @@ local function parse_chunk(ast, ls)
 end
 
 -- Parse body of a function.
-function parse_body(ast, ls, line, needself)
+function parse_body(ast, ls, line, needself, islambda)
     local pfs = ls.fs
     ls.fs = new_proto(ls, false)
     ast:fscope_begin()
     ls.fs.firstline = line
     local args = parse_params(ast, ls, needself)
-    local body = parse_block(ast, ls)
+    local body, lambdaexpr
+    if islambda and lex_opt(ls, 'TK_lambda_expr') then
+      ls.fs.has_return = true
+      body = {ast:return_stmt(expr_list(ast, ls), line)}
+      body.firstline, body.lastline = line, ls.linenumber
+      lambdaexpr = true
+    else
+      body = parse_block(ast, ls)
+      lambdaexpr = false
+    end
     ast:fscope_end()
     local proto = ls.fs
-    if ls.token ~= 'TK_end' then
+    if ls.token ~= 'TK_end' and not lambdaexpr then
         lex_match(ls, 'TK_end', 'TK_function', line)
     end
     ls.fs.lastline = ls.linenumber
-    ls:next()
+    if not lambdaexpr then
+      ls:next()
+    end
     ls.fs = pfs
     return args, body, proto
 end

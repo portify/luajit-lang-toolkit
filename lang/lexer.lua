@@ -393,8 +393,15 @@ local function llex(ls)
         elseif current == ' ' or current == '\t' or current == '\b' or current == '\f' then
             savespace_and_next(ls)
             -- nextchar(ls)
+        elseif current == '\\' then
+            nextchar(ls)
+            return 'TK_lambda'
         elseif current == '-' then
             nextchar(ls)
+            if ls.current == '>' then
+                nextchar(ls)
+                return 'TK_lambda_expr'
+            end
             if ls.current ~= '-' then return '-' end
             -- else is a comment
             nextchar(ls)
