@@ -236,7 +236,7 @@ local function parse_for_num(ast, ls, varname, line)
     else
         step = ast:literal(1)
     end
-    lex_check(ls, 'TK_do')
+    lex_opt(ls, 'TK_do')
     local body = parse_block(ast, ls, line)
     local var = ast:identifier(varname)
     return ast:for_stmt(var, init, last, step, body, line, ls.linenumber)
@@ -251,7 +251,7 @@ local function parse_for_iter(ast, ls, indexname)
     lex_check(ls, 'TK_in')
     local line = ls.linenumber
     local exps = expr_list(ast, ls)
-    lex_check(ls, 'TK_do')
+    lex_opt(ls, 'TK_do')
     local body = parse_block(ast, ls, line)
     return ast:for_iter_stmt(vars, exps, body, line, ls.linenumber)
 end
@@ -377,7 +377,7 @@ local function parse_while(ast, ls, line)
     ls:next() -- Skip 'while'.
     local cond = expr(ast, ls)
     ast:fscope_begin()
-    -- lex_check(ls, 'TK_do')
+    lex_opt(ls, 'TK_do')
     local body = parse_block(ast, ls)
     local lastline = ls.linenumber
     lex_match(ls, 'TK_end', 'TK_while', line)
@@ -388,7 +388,7 @@ end
 local function parse_then(ast, ls, tests, line)
     ls:next()
     tests[#tests+1] = expr(ast, ls)
-    -- lex_check(ls, 'TK_then')
+    lex_opt(ls, 'TK_then')
     return parse_block(ast, ls, line)
 end
 
