@@ -481,6 +481,29 @@ local function parse_stmt(ast, ls)
     return stmt, false
 end
 
+local function parse_params_lambda(ast, ls)
+    local args = { }
+    if ls.token == "(" then
+        ls:next()
+        lex_check(ls, ")")
+    else
+        repeat
+            if ls.token == 'TK_name' or (not LJ_52 and ls.token == 'TK_goto') then
+                local name = lex_str(ls)
+                args[#args+1] = ast:var_declare(name)
+            elseif ls.token == 'TK_dots' then
+                ls:next()
+                ls.fs.varargs = true
+                args[#args + 1] = ast:expr_vararg()
+                break
+            else
+                err_syntax(ls, "<name> or \"...\" expected")
+            end
+        until not lex_opt(ls, ',')
+    end
+    return args
+end
+
 local function parse_params(ast, ls, needself)
     lex_check(ls, "(")
     local args = { }
@@ -533,8 +556,12 @@ function parse_body(ast, ls, line, needself, islambda)
     ls.fs = new_proto(ls, false)
     ast:fscope_begin()
     ls.fs.firstline = line
-    local args = parse_params(ast, ls, needself)
-    local body, lambdaexpr
+    local args, body, lambdaexpr
+    if islambda then
+      args = parse_params_lambda(ast, ls)
+    else
+      args = parse_params(ast, ls, needself)
+    end
     if islambda and lex_opt(ls, 'TK_lambda_expr') then
       ls.fs.has_return = true
       body = {ast:return_stmt(expr_list(ast, ls), line)}
