@@ -13,9 +13,10 @@ local END_OF_STREAM = -1
 local reserved_keywords = set {
   "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
   "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
-  "global", "true", "until", "while",
+  "true", "until", "while",
   -- not used
-  "then"
+  "then",
+  -- consider "global"
 }
 
 local simplebinasn = {['+'] = true, ['-'] = true, ['*'] = true, ['/'] = true, ['^'] = true, ['%'] = true}
@@ -334,8 +335,6 @@ local function read_escape_char(ls)
     elseif c == '\\' or c == '\"' or c == '\'' then
         save(ls, c)
         nextchar(ls)
-    -- elseif c == END_OF_STREAM then
-    -- else
     elseif c ~= END_OF_STREAM then
         if not char_isdigit(c) then
             lex_error(ls, 'TK_string', "invalid escape sequence")

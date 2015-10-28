@@ -52,6 +52,7 @@ end
 local expr_primary, expr, expr_unop, expr_binop, expr_simple
 local expr_list, expr_table
 local parse_body, parse_block, parse_args
+local new_proto
 
 local function var_lookup(ast, ls)
     local name = lex_str(ls)
@@ -113,6 +114,23 @@ function expr_simple(ast, ls)
         e = ast:expr_vararg()
     elseif tk == '{' then
         return expr_table(ast, ls)
+    elseif tk == 'TK_do' then
+        local line = ls.linenumber
+        local pfs = ls.fs
+        ls:next()
+        ls.fs = new_proto(ls, false)
+        ast:fscope_begin()
+        ls.fs.firstline = line
+        local body = parse_block(ast, ls)
+        ast:fscope_end()
+        local proto = ls.fs
+        if ls.token ~= 'TK_end' then
+            lex_match(ls, 'TK_end', 'TK_do', line)
+        end
+        ls.fs.lastline = ls.linenumber
+        ls:next()
+        ls.fs = pfs
+        return ast:expr_function({}, body, proto)
     elseif tk == 'TK_function' then
         ls:next()
         local args, body, proto = parse_body(ast, ls, ls.linenumber, false)
@@ -196,7 +214,7 @@ function expr_primary(ast, ls)
             local key = lex_str(ls)
             local args = parse_args(ast, ls)
             vk, v = 'call', ast:expr_method_call(v, key, args, line)
-        elseif ls.token == '(' or ls.token == 'TK_string' or ls.token == '{' then
+        elseif ls.token == '(' or ls.token == 'TK_string' or ls.token == '{' or ls.token == '|' or ls.token == 'TK_do' then
             local args = parse_args(ast, ls)
             vk, v = 'call', ast:expr_function_call(v, args, line)
         else
@@ -301,6 +319,10 @@ function parse_args(ast, ls)
         local a = ls.tokenval
         ls:next()
         args = { ast:literal(a) }
+    elseif ls.token == 'TK_do'  or ls.token == '|' then
+        -- TODO: don't call expr here
+        local e = expr_simple(ast, ls)
+        args = { e }
     else
         err_syntax(ls, "function arguments expected")
     end
@@ -560,7 +582,7 @@ local function parse_params(ast, ls, needself)
     return args
 end
 
-local function new_proto(_, varargs)
+function new_proto(_, varargs)
     return { varargs = varargs }
 end
 
