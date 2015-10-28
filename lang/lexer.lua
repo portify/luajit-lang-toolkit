@@ -1,4 +1,5 @@
 local ffi = require('ffi')
+local set = require("lang.util").set
 
 local band = bit.band
 local strsub, strbyte, strchar = string.sub, string.byte, string.char
@@ -9,7 +10,14 @@ local ASCII_A, ASCII_Z = 65, 90
 
 local END_OF_STREAM = -1
 
-local ReservedKeyword = {['and'] = 1, ['break'] = 2, ['do'] = 3, ['else'] = 4, ['elseif'] = 5, ['end'] = 6, ['false'] = 7, ['for'] = 8, ['function'] = 9, ['goto'] = 10, ['if'] = 11, ['in'] = 12, ['local'] = 13, ['nil'] = 14, ['not'] = 15, ['or'] = 16, ['repeat'] = 17, ['return'] = 18, ['then'] = 19, ['true'] = 20, ['until'] = 21, ['while'] = 22 }
+local reserved_keywords = set {
+  "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+  "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
+  "global", "true", "until", "while",
+  -- not used
+  "then"
+}
+
 local simplebinasn = {['+'] = true, ['-'] = true, ['*'] = true, ['/'] = true, ['^'] = true, ['%'] = true}
 
 local uint64, int64 = ffi.typeof('uint64_t'), ffi.typeof('int64_t')
@@ -78,10 +86,10 @@ local function byte(ls, n)
     return strsub(ls.data, k, k)
 end
 
-local function skip(ls, n)
-    ls.n = ls.n - n
-    ls.p = ls.p + n
-end
+-- local function skip(ls, n)
+--     ls.n = ls.n - n
+--     ls.p = ls.p + n
+-- end
 
 local function pop(ls)
     local k = ls.p
@@ -326,8 +334,9 @@ local function read_escape_char(ls)
     elseif c == '\\' or c == '\"' or c == '\'' then
         save(ls, c)
         nextchar(ls)
-    elseif c == END_OF_STREAM then
-    else
+    -- elseif c == END_OF_STREAM then
+    -- else
+    elseif c ~= END_OF_STREAM then
         if not char_isdigit(c) then
             lex_error(ls, 'TK_string', "invalid escape sequence")
         end
@@ -382,8 +391,7 @@ local function llex(ls)
                 save_and_next(ls)
             until not char_isident(ls.current)
             local s = get_string(ls, 0, 0)
-            local reserved = ReservedKeyword[s]
-            if reserved then
+            if reserved_keywords[s] then
                 return 'TK_' .. s
             else
                 return 'TK_name', s
@@ -394,15 +402,8 @@ local function llex(ls)
         elseif current == ' ' or current == '\t' or current == '\b' or current == '\f' then
             savespace_and_next(ls)
             -- nextchar(ls)
-        elseif current == '\\' then
-            nextchar(ls)
-            return 'TK_lambda'
         elseif current == '-' then
             nextchar(ls)
-            if ls.current == '>' then
-                nextchar(ls)
-                return 'TK_lambda_expr'
-            end
             if ls.current ~= '-' then return '-' end
             -- else is a comment
             nextchar(ls)
@@ -504,7 +505,7 @@ end
 local LexerClass = { __index = Lexer }
 
 local function lex_setup(read_func, chunkname)
-    local header = false
+    -- local header = false
     local ls = {
         n = 0,
         tklookahead = 'TK_eof', -- No look-ahead token.
@@ -520,7 +521,7 @@ local function lex_setup(read_func, chunkname)
         ls.n = ls.n - 2
         ls.p = ls.p + 2
         nextchar(ls)
-        header = true
+        -- header = true
     end
     if ls.current == '#' then
         repeat
@@ -528,7 +529,7 @@ local function lex_setup(read_func, chunkname)
             if ls.current == END_OF_STREAM then return ls end
         until curr_is_newline(ls)
         inclinenumber(ls)
-        header = true
+        -- header = true
     end
     return setmetatable(ls, LexerClass)
 end
