@@ -117,6 +117,9 @@ function expr_simple(ast, ls)
         ls:next()
         local args, body, proto = parse_body(ast, ls, ls.linenumber, false)
         return ast:expr_function(args, body, proto)
+    elseif tk == "|" then
+      local args, body, proto = parse_body(ast, ls, ls.linenumber, false, true)
+      return ast:expr_function(args, body, proto)
     else
         return expr_primary(ast, ls)
     end
@@ -193,7 +196,7 @@ function expr_primary(ast, ls)
             local key = lex_str(ls)
             local args = parse_args(ast, ls)
             vk, v = 'call', ast:expr_method_call(v, key, args, line)
-        elseif ls.token == '(' or ls.token == 'TK_string' or ls.token == '{' then
+        elseif ls.token == '(' or ls.token == 'TK_string' or ls.token == '{' or ls.token == "|" then
             local args = parse_args(ast, ls)
             vk, v = 'call', ast:expr_function_call(v, args, line)
         else
@@ -300,10 +303,27 @@ function parse_args(ast, ls)
         local a = ls.tokenval
         ls:next()
         args = { ast:literal(a) }
+    elseif ls.token == "|" then
+      local args_, body, proto = parse_body(ast, ls, ls.linenumber, false, true)
+      args = {ast:expr_function(args_, body, proto)}
     else
         err_syntax(ls, "function arguments expected")
     end
     return args
+end
+
+local function var_declared(ast, name)
+  local scope = ast.current
+
+  while scope do
+    if scope.vars[name] then
+      return true
+    end
+
+    scope = scope.parent
+  end
+
+  return false
 end
 
 local function parse_assignment(ast, ls, vlist, var, vk)
@@ -316,6 +336,25 @@ local function parse_assignment(ast, ls, vlist, var, vk)
     else -- Parse RHS.
         lex_check(ls, '=')
         local exps = expr_list(ast, ls)
+
+        if vk ~= "indexed" then
+          -- Try to automatically declare locals
+          local decls = {}
+
+          for _, ident in ipairs(vlist) do
+            if not var_declared(ast, ident.name) then
+              table.insert(decls, ident.name)
+            end
+          end
+
+          if #decls >= 1 then
+            return {__multiple_stmts = true,
+              ast:local_decl(decls, {}, line),
+              ast:assignment_expr(vlist, exps, line)
+            }
+          end
+        end
+
         return ast:assignment_expr(vlist, exps, line)
     end
 end
@@ -356,15 +395,18 @@ local function parse_func(ast, ls, line)
     local needself = false
     ls:next() -- Skip 'function'.
     -- Parse function name.
-    local v = var_lookup(ast, ls)
+    local simple, v = true, var_lookup(ast, ls)
     while ls.token == '.' do -- Multiple dot-separated fields.
-        v = expr_field(ast, ls, v)
+        simple, v = false, expr_field(ast, ls, v)
     end
     if ls.token == ':' then -- Optional colon to signify method call.
         needself = true
-        v = expr_field(ast, ls, v)
+        simple, v = false, expr_field(ast, ls, v)
     end
     local args, body, proto = parse_body(ast, ls, line, needself)
+    if simple and not var_declared(ast, v.name) then
+      return ast:local_function_decl(v.name, args, body, proto)
+    end
     return ast:function_decl(v, args, body, proto)
 end
 
@@ -476,6 +518,28 @@ local function parse_stmt(ast, ls)
     return stmt, false
 end
 
+local function parse_params_lambda(ast, ls)
+  lex_check(ls, "|")
+  local args = {}
+
+  while ls.token ~= "|" do
+    if ls.token == 'TK_name' or (not LJ_52 and ls.token == 'TK_goto') then
+      local name = lex_str(ls)
+      args[#args+1] = ast:var_declare(name)
+    elseif ls.token == 'TK_dots' then
+      ls:next()
+      ls.fs.varargs = true
+      args[#args + 1] = ast:expr_vararg()
+      break
+    else
+      err_syntax(ls, "<name> or \"...\" expected")
+    end
+  end
+
+  lex_check(ls, "|")
+  return args
+end
+
 local function parse_params(ast, ls, needself)
     lex_check(ls, "(")
     local args = { }
@@ -511,7 +575,13 @@ local function parse_block_stmts(ast, ls)
     local body = { }
     while not islast and not EndOfBlock[ls.token] do
         stmt, islast = parse_stmt(ast, ls)
-        body[#body + 1] = stmt
+        if stmt.__multiple_stmts then
+          for _, s in ipairs(stmt) do
+            table.insert(body, s)
+          end
+        else
+          body[#body + 1] = stmt
+        end
         lex_opt(ls, ';')
     end
     return body, firstline, ls.linenumber
@@ -523,20 +593,39 @@ local function parse_chunk(ast, ls)
 end
 
 -- Parse body of a function.
-function parse_body(ast, ls, line, needself)
+function parse_body(ast, ls, line, needself, islambda)
     local pfs = ls.fs
     ls.fs = new_proto(ls, false)
     ast:fscope_begin()
     ls.fs.firstline = line
-    local args = parse_params(ast, ls, needself)
-    local body = parse_block(ast, ls)
+
+    local args, body, lambdaexpr
+
+    if islambda then
+      args = parse_params_lambda(ast, ls)
+    else
+      args = parse_params(ast, ls, needself)
+    end
+
+    if islambda and not lex_opt(ls, 'TK_do') then
+      ls.fs.has_return = true
+      body = {ast:return_stmt(expr_list(ast, ls), line)}
+      body.firstline, body.lastline = line, ls.linenumber
+      lambdaexpr = true
+    else
+      body = parse_block(ast, ls)
+      lambdaexpr = false
+    end
+
     ast:fscope_end()
     local proto = ls.fs
-    if ls.token ~= 'TK_end' then
+    if ls.token ~= 'TK_end' and not lambdaexpr then
         lex_match(ls, 'TK_end', 'TK_function', line)
     end
     ls.fs.lastline = ls.linenumber
-    ls:next()
+    if not lambdaexpr then
+      ls:next()
+    end
     ls.fs = pfs
     return args, body, proto
 end
